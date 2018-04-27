@@ -162,7 +162,40 @@ _PIF_WORK	= (_PIF_PER_TRAP)
 		tm	off+\addr, \mask
 	.endm
 
+	.macro BPOFF
+	.pushsection .altinstr_replacement, "ax"
+660:	.long	0xb2e8c000
+	.popsection
+661:	.long	0x47000000
+	.pushsection .altinstructions, "a"
+	.long 661b - .
+	.long 660b - .
+	.word 82
+	.byte 4
+	.byte 4
+	.popsection
+	.endm
+
+	.macro BPON
+	.pushsection .altinstr_replacement, "ax"
+662:	.long	0xb2e8d000
+	.popsection
+663:	.long	0x47000000
+	.pushsection .altinstructions, "a"
+	.long 663b - .
+	.long 662b - .
+	.word 82
+	.byte 4
+	.byte 4
+	.popsection
+	.endm
+
 	.section .kprobes.text, "ax"
+
+ENTRY(__bpon)
+	.globl __bpon
+	BPON
+	br	%r14
 
 /*
  * Scheduler resume function, called by switch_to
@@ -223,18 +256,26 @@ ENTRY(sie64a)
 	jnz	.Lsie_skip
 	TSTMSK	__LC_CPU_FLAGS,_CIF_FPU
 	jo	.Lsie_skip			# exit if fp/vx regs changed
+	BPON
 	sie	0(%r14)
+.Lsie_exit:
+	BPOFF
 .Lsie_skip:
 	ni	__SIE_PROG0C+3(%r14),0xfe	# no longer in SIE
 	lctlg	%c1,%c1,__LC_USER_ASCE		# load primary asce
 .Lsie_done:
 # some program checks are suppressing. C code (e.g. do_protection_exception)
-# will rewind the PSW by the ILC, which is 4 bytes in case of SIE. Other
-# instructions between sie64a and .Lsie_done should not cause program
-# interrupts. So lets use a nop (47 00 00 00) as a landing pad.
+# will rewind the PSW by the ILC, which is often 4 bytes in case of SIE. There
+# are some corner cases (e.g. runtime instrumentation) where ILC is unpredictable.
+# Other instructions between sie64a and .Lsie_done should not cause program
+# interrupts. So lets use 3 nops as a landing pad for all possible rewinds.
 # See also .Lcleanup_sie
-.Lrewind_pad:
-	nop	0
+.Lrewind_pad6:
+	nopr	7
+.Lrewind_pad4:
+	nopr	7
+.Lrewind_pad2:
+	nopr	7
 	.globl sie_exit
 sie_exit:
 	lg	%r14,__SF_EMPTY+8(%r15)		# load guest register save area
@@ -253,7 +294,9 @@ sie_exit:
 	stg	%r14,__SF_EMPTY+16(%r15)	# set exit reason code
 	j	sie_exit
 
-	EX_TABLE(.Lrewind_pad,.Lsie_fault)
+	EX_TABLE(.Lrewind_pad6,.Lsie_fault)
+	EX_TABLE(.Lrewind_pad4,.Lsie_fault)
+	EX_TABLE(.Lrewind_pad2,.Lsie_fault)
 	EX_TABLE(sie_exit,.Lsie_fault)
 #endif
 
@@ -266,6 +309,7 @@ ENTRY(system_call)
 	stpt	__LC_SYNC_ENTER_TIMER
 .Lsysc_stmg:
 	stmg	%r8,%r15,__LC_SAVE_AREA_SYNC
+	BPOFF
 	lg	%r10,__LC_LAST_BREAK
 	lg	%r12,__LC_THREAD_INFO
 	lghi	%r14,_PIF_SYSCALL
@@ -312,10 +356,12 @@ ENTRY(system_call)
 	jnz	.Lsysc_work			# check for work
 	TSTMSK	__LC_CPU_FLAGS,_CIF_WORK
 	jnz	.Lsysc_work
+	BPON
 .Lsysc_restore:
 	lg	%r14,__LC_VDSO_PER_CPU
 	lmg	%r0,%r10,__PT_R0(%r11)
 	mvc	__LC_RETURN_PSW(16),__PT_PSW(%r11)
+.Lsysc_exit_timer:
 	stpt	__LC_EXIT_TIMER
 	mvc	__VDSO_ECTG_BASE(16,%r14),__LC_EXIT_TIMER
 	lmg	%r11,%r15,__PT_R11(%r11)
@@ -471,6 +517,7 @@ ENTRY(kernel_thread_starter)
 
 ENTRY(pgm_check_handler)
 	stpt	__LC_SYNC_ENTER_TIMER
+	BPOFF
 	stmg	%r8,%r15,__LC_SAVE_AREA_SYNC
 	lg	%r10,__LC_LAST_BREAK
 	lg	%r12,__LC_THREAD_INFO
@@ -569,6 +616,7 @@ ENTRY(pgm_check_handler)
 ENTRY(io_int_handler)
 	STCK	__LC_INT_CLOCK
 	stpt	__LC_ASYNC_ENTER_TIMER
+	BPOFF
 	stmg	%r8,%r15,__LC_SAVE_AREA_ASYNC
 	lg	%r10,__LC_LAST_BREAK
 	lg	%r12,__LC_THREAD_INFO
@@ -620,8 +668,13 @@ ENTRY(io_int_handler)
 	lg	%r14,__LC_VDSO_PER_CPU
 	lmg	%r0,%r10,__PT_R0(%r11)
 	mvc	__LC_RETURN_PSW(16),__PT_PSW(%r11)
+	tm	__PT_PSW+1(%r11),0x01	# returning to user ?
+	jno	.Lio_exit_kernel
+	BPON
+.Lio_exit_timer:
 	stpt	__LC_EXIT_TIMER
 	mvc	__VDSO_ECTG_BASE(16,%r14),__LC_EXIT_TIMER
+.Lio_exit_kernel:
 	lmg	%r11,%r15,__PT_R11(%r11)
 	lpswe	__LC_RETURN_PSW
 .Lio_done:
@@ -753,6 +806,7 @@ ENTRY(io_int_handler)
 ENTRY(ext_int_handler)
 	STCK	__LC_INT_CLOCK
 	stpt	__LC_ASYNC_ENTER_TIMER
+	BPOFF
 	stmg	%r8,%r15,__LC_SAVE_AREA_ASYNC
 	lg	%r10,__LC_LAST_BREAK
 	lg	%r12,__LC_THREAD_INFO
@@ -801,6 +855,7 @@ ENTRY(psw_idle)
 	.insn	rsy,0xeb0000000017,%r1,5,__SF_EMPTY+16(%r15)
 .Lpsw_idle_stcctm:
 #endif
+	BPON
 	STCK	__CLOCK_IDLE_ENTER(%r2)
 	stpt	__TIMER_IDLE_ENTER(%r2)
 .Lpsw_idle_lpsw:
@@ -905,6 +960,7 @@ load_fpu_regs:
  */
 ENTRY(mcck_int_handler)
 	STCK	__LC_MCCK_CLOCK
+	BPOFF
 	la	%r1,4095		# revalidate r1
 	spt	__LC_CPU_TIMER_SAVE_AREA-4095(%r1)	# revalidate cpu timer
 	lmg	%r0,%r15,__LC_GPREGS_SAVE_AREA-4095(%r1)# revalidate gprs
@@ -971,6 +1027,7 @@ ENTRY(mcck_int_handler)
 	mvc	__LC_RETURN_MCCK_PSW(16),__PT_PSW(%r11) # move return PSW
 	tm	__LC_RETURN_MCCK_PSW+1,0x01 # returning to user ?
 	jno	0f
+	BPON
 	stpt	__LC_EXIT_TIMER
 	mvc	__VDSO_ECTG_BASE(16,%r14),__LC_EXIT_TIMER
 0:	lmg	%r11,%r15,__PT_R11(%r11)
@@ -1165,15 +1222,23 @@ cleanup_critical:
 	br	%r14
 
 .Lcleanup_sysc_restore:
+	# check if stpt has been executed
 	clg	%r9,BASED(.Lcleanup_sysc_restore_insn)
+	jh	0f
+	mvc	__LC_EXIT_TIMER(8),__LC_ASYNC_ENTER_TIMER
+	cghi	%r11,__LC_SAVE_AREA_ASYNC
 	je	0f
+	mvc	__LC_EXIT_TIMER(8),__LC_MCCK_ENTER_TIMER
+0:	clg	%r9,BASED(.Lcleanup_sysc_restore_insn+8)
+	je	1f
 	lg	%r9,24(%r11)		# get saved pointer to pt_regs
 	mvc	__LC_RETURN_PSW(16),__PT_PSW(%r9)
 	mvc	0(64,%r11),__PT_R8(%r9)
 	lmg	%r0,%r7,__PT_R0(%r9)
-0:	lmg	%r8,%r9,__LC_RETURN_PSW
+1:	lmg	%r8,%r9,__LC_RETURN_PSW
 	br	%r14
 .Lcleanup_sysc_restore_insn:
+	.quad	.Lsysc_exit_timer
 	.quad	.Lsysc_done - 4
 
 .Lcleanup_io_tif:
@@ -1181,15 +1246,20 @@ cleanup_critical:
 	br	%r14
 
 .Lcleanup_io_restore:
+	# check if stpt has been executed
 	clg	%r9,BASED(.Lcleanup_io_restore_insn)
-	je	0f
+	jh	0f
+	mvc	__LC_EXIT_TIMER(8),__LC_MCCK_ENTER_TIMER
+0:	clg	%r9,BASED(.Lcleanup_io_restore_insn+8)
+	je	1f
 	lg	%r9,24(%r11)		# get saved r11 pointer to pt_regs
 	mvc	__LC_RETURN_PSW(16),__PT_PSW(%r9)
 	mvc	0(64,%r11),__PT_R8(%r9)
 	lmg	%r0,%r7,__PT_R0(%r9)
-0:	lmg	%r8,%r9,__LC_RETURN_PSW
+1:	lmg	%r8,%r9,__LC_RETURN_PSW
 	br	%r14
 .Lcleanup_io_restore_insn:
+	.quad	.Lio_exit_timer
 	.quad	.Lio_done - 4
 
 .Lcleanup_idle:
