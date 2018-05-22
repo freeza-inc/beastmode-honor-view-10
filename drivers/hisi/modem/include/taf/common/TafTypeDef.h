@@ -480,7 +480,22 @@ extern VOS_VOID TAF_STD_MemMove_s(
     VOS_INT32                           lFileIdAndLine
 );
 
-#if (VOS_OS_VER == VOS_WIN32)
+#define TAF_MEM_CPY_S(pDestBuffer, ulDestLen,  pSrcBuffer, ulCount) { \
+            TAF_STD_MemCpy_s( (pDestBuffer), (ulDestLen), (pSrcBuffer), (ulCount), (VOS_INT)((THIS_FILE_ID << 16) | __LINE__) ); \
+        }
+
+#define TAF_MEM_SET_S(pDestBuffer, ulDestLen, ucData, ulCount) { \
+            TAF_STD_MemSet_s( (pDestBuffer), (ulDestLen), ((VOS_CHAR)(ucData)), (ulCount), (VOS_INT)((THIS_FILE_ID << 16) | __LINE__) ); \
+        }
+
+#define TAF_MEM_MOVE_S(pDestBuffer, ulDestLen, pucSrcBuffer, ulCount) { \
+            TAF_STD_MemMove_s( (pDestBuffer), (ulDestLen), (pucSrcBuffer), (ulCount), (VOS_INT)((THIS_FILE_ID << 16) | __LINE__) ); \
+        }
+
+#define TAF_MEM_CMP( pucDestBuffer, pucSrcBuffer, ulBufferLen ) \
+                VOS_MemCmp( pucDestBuffer, pucSrcBuffer, ulBufferLen )
+
+/* #if (VOS_OS_VER == VOS_WIN32)
 #define TAF_MEM_CPY_S(pDestBuffer, ulDestLen,  pSrcBuffer, ulCount) VOS_MemCpy_s( pDestBuffer, ulDestLen,  pSrcBuffer, ulCount)
 
 #define TAF_MEM_SET_S(pDestBuffer, ulDestLen, ucData, ulCount) VOS_MemSet_s( pDestBuffer, ulDestLen, (VOS_CHAR)(ucData), ulCount )
@@ -531,7 +546,7 @@ extern VOS_VOID TAF_STD_MemMove_s(
 #define TAF_MEM_CMP( pucDestBuffer, pucSrcBuffer, ulBufferLen ) \
                 VOS_MemCmp( pucDestBuffer, pucSrcBuffer, ulBufferLen )
 
-#endif
+#endif */
 
 #define TAF_MIN(x, y)\
         (((x)<(y))?(x):(y))
