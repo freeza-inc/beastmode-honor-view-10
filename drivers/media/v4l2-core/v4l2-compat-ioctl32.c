@@ -163,7 +163,8 @@ static int __get_v4l2_format32(struct v4l2_format *kp, struct v4l2_format32 __us
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_OVERLAY:
 		/* revesied for V8 L Update */
 		/* return get_v4l2_window32(&kp->fmt.win, &up->fmt.win); */
-		return get_v4l2_pix_format(&kp->fmt.pix, &up->fmt.pix);
+		return copy_from_user(&kp->fmt.pix, &up->fmt.pix,
+				      sizeof(kp->fmt.pix)) ? -EFAULT : 0;
 	case V4L2_BUF_TYPE_VBI_CAPTURE:
 	case V4L2_BUF_TYPE_VBI_OUTPUT:
 		return copy_from_user(&kp->fmt.vbi, &up->fmt.vbi,
