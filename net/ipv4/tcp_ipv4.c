@@ -1832,6 +1832,10 @@ process:
 			reqsk_put(req);
 			goto discard_it;
 		}
+		if (tcp_checksum_complete(skb)) {
+			reqsk_put(req);
+			goto csum_error;
+		}
 #ifdef CONFIG_MPTCP
 		if (unlikely(sk->sk_state != TCP_LISTEN && !is_meta_sk(sk))) {
 #else
