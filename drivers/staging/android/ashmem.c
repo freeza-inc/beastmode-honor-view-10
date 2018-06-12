@@ -335,16 +335,16 @@ static loff_t ashmem_llseek(struct file *file, loff_t offset, int origin)
 	mutex_lock(&asma->lock);
 
 	if (asma->size == 0) {
-		mutex_unlock(&ashmem->lock);
+		mutex_unlock(&asma->lock);
 		return -EINVAL;
 	}
 
 	if (!asma->file) {
-		mutex_unlock(&ashmem->lock);
+		mutex_unlock(&asma->lock);
 		return -EBADF;
 	}
 
-	mutex_unlock(&ashmem->lock);
+	mutex_unlock(&asma->lock);
 
 	ret = vfs_llseek(asma->file, offset, origin);
 	if (ret < 0)
