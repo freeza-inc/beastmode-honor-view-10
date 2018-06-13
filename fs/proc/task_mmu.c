@@ -386,13 +386,12 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma, int is_pid)
 
 		if (is_stack(priv, vma))
 			name = "[stack]";
-			goto done;
 		}
+
 		if (vma_get_anon_name(vma)) {
 			seq_pad(m, ' ');
 			seq_print_vma_name(m, vma);
 		}
-	}
 
 done:
 	if (name) {
